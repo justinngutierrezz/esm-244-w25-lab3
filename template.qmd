@@ -1,6 +1,6 @@
 ---
 title: "Lab 3 Key"
-author: "Nathaniel Grimes"
+author: "Justin Gutierrez"
 format: html
 ---
 ## Load in data and packages
@@ -18,7 +18,30 @@ t_df<-read_csv(here("data", "titanic_survival.csv"))
 
 Write a description of how you go about applying machine learning problems. If you drew a diagram, share with a neighbor and discuss.
 
+0. What is your research question 
 
+1. Gather data 
+
+2. Develop a hypothesis 
+    a. Methodology (map out your plan)
+    b. Clean data, what variables you want to work with
+    c. Exploratory Data Analysis 
+
+3. Choosing metrics 
+
+4. Split data into testing and training 
+
+5. Building Models 
+    a. Create model options, what variables? 
+    b. Data preprocessing 
+    c. Train model
+    d. Tune model 
+    e. evaluate performance 
+    f. model selection 
+    
+6. Finalize model (train on whole dataset)
+
+7. Interpret results, visualize, communicate zzzz
 
 
 ## Tidymodels Overview
@@ -41,6 +64,46 @@ In real life, we would have to go out and collect the data. Today, we will use t
 
 Take 15 minutes to explore the data. Are there any immediate changes to the data that we need to change? What relationships can you see through graphs? What variables could be of interest to predict survival of passengers on the Titanic?
 
+• lots of NA in the cabin column, probably just eliminate it from model consideration, ticket number also probably unecessary 
+• age could be formatted to not have 00 
+• things that are likely to be relevant for model selection include class, sex, age, and fare 
+
+```{r}
+t_df_EDA <- t_df |> 
+  select(passenger_id, survived, pclass, name, sex, age, fare, sib_sp, parch)|>
+  drop_na()
+
+survivor <- t_df_EDA |> 
+  filter(survived == 1)
+
+dead <- t_df_EDA |> 
+  filter(survived == 0)
+
+mean(survivor$fare) #51.84
+mean(dead$fare) #22.97 
+
+TitanicBox <- ggplot(t_df_EDA, aes(y=fare, x=survived, group=survived))+
+  geom_boxplot()+
+  labs(x="Survived", y="Fare")+
+  scale_y_continuous(0:550)
+  theme_bw()
+TitanicBox
+
+TitanicBar <- ggplot(t_df_EDA, aes(x=pclass, group =survived, fill = survived))+
+  geom_histogram()
+TitanicBar
+
+
+
+```
+Variables of Interest: class, age, sex, embark, fare? 
+
+```{r}
+surv_df <- t_df |> 
+  mutate(survived = factor(survived),
+         pclass = factor(pclass))|> 
+  select(-cabin,-ticket)
+```
 
 
 ## Data Split
@@ -111,12 +174,12 @@ glm_rec<-recipe(survived ~ sex + pclass, data = surv_train_df)
 # steps we need to do to prepare data for lasso
 
 lasso_rec<-recipe(survived~.,data=surv_train_df) %>%
-  update_role(passenger_id, new_role = "ID") %>%
-  step_rm(name,age) %>%
-  step_unknown(all_nominal(),-all_outcomes()) |> 
-  step_dummy(all_nominal(),-all_outcomes()) |>
-  step_zv(all_numeric(),-all_outcomes()) |> 
-  step_normalize(all_numeric(),-all_outcomes())
+  update_role(passenger_id, new_role = "ID") %>% #not an independent variable just an ID 
+  step_rm(name,age) %>% #too many NA's not worth running 
+  step_unknown(all_nominal(),-all_outcomes()) |> #if you see NA, make new factor of unknown 
+  step_dummy(all_nominal(),-all_outcomes()) |> #all categories are dummy variables 
+  step_zv(all_numeric(),-all_outcomes()) |> #any with no variance, get rid of them 
+  step_normalize(all_numeric(),-all_outcomes()) #all numeric data must be normalized, all same scale 
 
 ```
 
@@ -148,8 +211,18 @@ Now fill in the following code chunk to fit the lasso model. Create a table (or 
 
 
 ```{r}
+lasso_wf <- workflow() %>%
+  add_recipe(lasso_rec) %>%
+  add_model(lasso_md) 
 
+lasso_fit<-lasso_wf %>%
+  fit(surv_train_df)
 
+lasso_test<-surv_test_df |>
+  mutate(predict(lasso_fit,new_data = surv_test_df)) |> 
+  mutate(predict(lasso_fit,new_data = surv_test_df, type='prob'))
+
+table(lasso_test$survived, lasso_test$.pred_class)
 ```
 
 ### Evaluate Performance
@@ -168,7 +241,11 @@ lasso_test |>
 Calculate the `ROC AUC` for each model. Use the `roc_auc` function from yardstick.
 
 ```{r}
+log_test |> 
+  roc_auc(truth=survived, .pred_0)
 
+lasso_test |> 
+  roc_auc(truth=survived, .pred_0)
 ```
 
 
@@ -195,6 +272,7 @@ collect_metrics(lasso_res)
 ```
 
 Which model do we choose?
+Lasso is barely better than the logistic model 
 
 Let's look at the actual models to get a better understanding.
 
@@ -205,7 +283,7 @@ log_fit |>
 
 lasso_fit |>
   extract_fit_parsnip() |> 
-  tidy()
+  tidy() #ones we dont need are set to 0 
 ```
 Lasso set many of the parameters to zero. How do you interpret this model? Why would you want to use as opposed to simple logistic regression?
 
@@ -229,7 +307,7 @@ final_log |>
   extract_fit_parsnip() |>
   tidy() |> 
   mutate(odds=exp(estimate),
-         prob=odds/(1+estimate))
+         prob=odds/(1+odds))
 ```
 
 Please give this a go on your own with the post-lab exercise. I will be walking around to assist.
